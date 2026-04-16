@@ -84,12 +84,59 @@ export class Board {
         ? { direction: tile.direction, value: tile.value + 1, player }
         : tile,
     );
+
     return new Board(next, this.size);
   }
 
+  editTile(index: number, fn: (tile: TileState) => TileState): Board {
+    const next: TileState[] = this.tiles.map((tile, idx) =>
+      idx === index ? fn(tile) : tile,
+    );
+    return new Board(next, this.size);
+  }
+
+  scan(): number[] | null {
+    const unstable = this.tiles
+      .map((tile, idx) => (tile.value === 4 ? idx : -1))
+      .filter((idx) => idx !== -1);
+    return unstable.length > 0 ? unstable : null;
+  }
+
   progress(): Board {
-    // placeholder for future explosion / chain rules
-    return this;
+    // Find all unstable tiles
+    const crazyTiles = this.scan();
+    if (!crazyTiles) {
+      return this;
+    }
+
+    let nextBoard: Board = this;
+
+    crazyTiles.forEach((crazyIdx) => {
+      const owner = nextBoard.tiles[crazyIdx].player;
+      if (owner === null) {
+        // skip: don't propagate from empty tile
+        return;
+      }
+
+      // First, increment each neighbor by 1 and set their owner
+      nextBoard.neighbors(crazyIdx).forEach((idx) => {
+        nextBoard = nextBoard.editTile(idx, (tile) => ({
+          ...tile,
+          value: tile.value + 1,
+          player: owner,
+        }));
+      });
+
+      // Then, clear the source tile (reset to default)
+      nextBoard = nextBoard.editTile(crazyIdx, () => TileStateFactory());
+    });
+    
+    // If new unstable tiles were created in the process then run again
+    if (nextBoard.scan()) {
+      nextBoard = nextBoard.progress();
+    }
+    
+    return nextBoard;
   }
 }
 
@@ -112,6 +159,7 @@ export const useGame = () => {
         const nextBoard = board.placeInitial(index, turn);
         setBoard(nextBoard);
         setTurn(!turn);
+
         if (Board.bothPlayersPresent(nextBoard.tiles)) {
           setPhase("playing");
           setTurn(true);
@@ -119,7 +167,10 @@ export const useGame = () => {
         return;
       }
 
-      setBoard(board.increment([index], turn));
+      // playing phase
+
+      const afterMove = board.increment([index], turn).progress();
+      setBoard(afterMove);
       setTurn(!turn);
     },
   };
