@@ -41,7 +41,7 @@ const GameTile = ({ id, tileState }: { id: number; tileState: TileState }) => {
         <>
           <DirectionIcon direction={tileState.direction} />
           <span className={`text-lg font-semibold ${fgClass}`}>
-            {tileState.value}
+            {Math.min(tileState.value, 4)}
           </span>
         </>
       )}

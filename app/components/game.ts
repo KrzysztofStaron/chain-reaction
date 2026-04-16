@@ -185,20 +185,9 @@ export class Board {
   }
 }
 
-const createDebugBoard = (): Board => {
-  const total = BOARD_SIZE * BOARD_SIZE;
-  const p2Index = Math.floor(total / 2);
-  const tiles: TileState[] = Array.from({ length: total }, (_, idx) => ({
-    direction: "orthogonal",
-    value: 3,
-    player: idx !== p2Index,
-  }));
-  return new Board(tiles, BOARD_SIZE);
-};
-
-export const gameStateAtom = atom<Board>(createDebugBoard());
-export const turnAtom = atom(false);
-export const gamePhaseAtom = atom<GamePhase>("playing");
+export const gameStateAtom = atom<Board>(Board.create(BOARD_SIZE));
+export const turnAtom = atom(Math.random() < 0.5);
+export const gamePhaseAtom = atom<GamePhase>("placement");
 /** Set when `phase === "ended"`: `true` = player 1 won, `false` = player 2 */
 export const winnerAtom = atom<boolean | null>(null);
 /** Explosions currently animating on the board. Empty when idle. */
