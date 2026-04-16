@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@plugin "tailwindcss-corner-shape/presets/squircle";
 
 :root {
   --background: #ffffff;
