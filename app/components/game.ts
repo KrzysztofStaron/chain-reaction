@@ -3,6 +3,11 @@ import { Direction, TileState, TileStateFactory } from "./types";
 
 export const BOARD_SIZE = 5;
 
+/** Value of each player's first orb when placed during the opening phase */
+export const INITIAL_ORB_VALUE = 3;
+
+export type GamePhase = "placement" | "playing";
+
 export class Board {
   private static readonly OFFSETS: Record<
     Direction,
@@ -30,6 +35,34 @@ export class Board {
 
   toIndex(x: number, y: number): number {
     return y * this.size + x;
+  }
+
+  canInteract(index: number, turn: boolean, phase: GamePhase): boolean {
+    const tile = this.tiles[index];
+    if (phase === "placement") {
+      return tile.player === null && tile.value === 0;
+    }
+    return tile.player === turn;
+  }
+
+  placeInitial(index: number, player: boolean): Board {
+    const next: TileState[] = this.tiles.map((tile, idx) =>
+      idx === index
+        ? { direction: tile.direction, player, value: INITIAL_ORB_VALUE }
+        : tile,
+    );
+    return new Board(next, this.size);
+  }
+
+  static bothPlayersPresent(tiles: readonly TileState[]): boolean {
+    let hasP1 = false;
+    let hasP2 = false;
+    for (const t of tiles) {
+      if (t.player === true) hasP1 = true;
+      if (t.player === false) hasP2 = true;
+      if (hasP1 && hasP2) return true;
+    }
+    return false;
   }
 
   neighbors(index: number): number[] {
@@ -62,14 +95,30 @@ export class Board {
 
 export const gameStateAtom = atom<Board>(Board.create(BOARD_SIZE));
 export const turnAtom = atom(true);
+export const gamePhaseAtom = atom<GamePhase>("placement");
 
 export const useGame = () => {
   const [board, setBoard] = useAtom(gameStateAtom);
   const [turn, setTurn] = useAtom(turnAtom);
+  const [phase, setPhase] = useAtom(gamePhaseAtom);
   return {
     board,
     turn,
+    phase,
     clickTile: (index: number) => {
+      if (!board.canInteract(index, turn, phase)) return;
+
+      if (phase === "placement") {
+        const nextBoard = board.placeInitial(index, turn);
+        setBoard(nextBoard);
+        setTurn(!turn);
+        if (Board.bothPlayersPresent(nextBoard.tiles)) {
+          setPhase("playing");
+          setTurn(true);
+        }
+        return;
+      }
+
       setBoard(board.increment([index], turn));
       setTurn(!turn);
     },

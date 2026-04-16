@@ -2,7 +2,7 @@
 
 import { type MouseEvent } from "react";
 import GameTile from "./components/GameTile";
-import { turnAtom, useGame } from "./components/game";
+import { gamePhaseAtom, turnAtom, useGame } from "./components/game";
 import { useAtom } from "jotai";
 
 const GameBoard = () => {
@@ -33,17 +33,25 @@ const GameBoard = () => {
 
 export default function Home() {
   const [turn] = useAtom(turnAtom);
+  const [phase] = useAtom(gamePhaseAtom);
 
   return (
     <div className="container w-screen h-screen flex flex-col items-center justify-center gap-4" style={{ backgroundColor: "#DE7356" }}>
-      <div
-        className={`font-semibold text-lg px-5 py-2 rounded-full shadow-md border-2 ${
-          turn
-            ? "bg-player-1/90 text-player-1-fg border-player-1-border/80"
-            : "bg-player-2/90 text-player-2-fg border-player-2-border/80"
-        }`}
-      >
-        Turn: Player {turn ? 1 : 2}
+      <div className="flex flex-col items-center gap-1">
+        <div
+          className={`font-semibold text-lg px-5 py-2 rounded-full shadow-md border-2 ${
+            turn
+              ? "bg-player-1/90 text-player-1-fg border-player-1-border/80"
+              : "bg-player-2/90 text-player-2-fg border-player-2-border/80"
+          }`}
+        >
+          Turn: Player {turn ? 1 : 2}
+        </div>
+        {phase === "placement" ? (
+          <p className="text-white/90 text-sm text-center max-w-xs">
+            Place your first orb on any empty cell (starts at 3).
+          </p>
+        ) : null}
       </div>
       <GameBoard />
     </div>
