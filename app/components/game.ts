@@ -6,7 +6,7 @@ export const BOARD_SIZE = 5;
 /** Value of each player's first orb when placed during the opening phase */
 export const INITIAL_ORB_VALUE = 3;
 
-export type GamePhase = "placement" | "playing";
+export type GamePhase = "placement" | "playing" | "ended";
 
 export class Board {
   private static readonly OFFSETS: Record<
@@ -38,6 +38,7 @@ export class Board {
   }
 
   canInteract(index: number, turn: boolean, phase: GamePhase): boolean {
+    if (phase === "ended") return false;
     const tile = this.tiles[index];
     if (phase === "placement") {
       return tile.player === null && tile.value === 0;
@@ -63,6 +64,20 @@ export class Board {
       if (hasP1 && hasP2) return true;
     }
     return false;
+  }
+
+  /** `true` = only player 1 has orbs, `false` = only player 2, `null` = both or neither still present */
+  static soleSurvivor(tiles: readonly TileState[]): boolean | null {
+    let hasP1 = false;
+    let hasP2 = false;
+    for (const t of tiles) {
+      if (t.player === true) hasP1 = true;
+      if (t.player === false) hasP2 = true;
+    }
+    if (hasP1 && hasP2) return null;
+    if (hasP1 && !hasP2) return true;
+    if (!hasP1 && hasP2) return false;
+    return null;
   }
 
   neighbors(index: number): number[] {
@@ -143,16 +158,20 @@ export class Board {
 export const gameStateAtom = atom<Board>(Board.create(BOARD_SIZE));
 export const turnAtom = atom(true);
 export const gamePhaseAtom = atom<GamePhase>("placement");
+/** Set when `phase === "ended"`: `true` = player 1 won, `false` = player 2 */
+export const winnerAtom = atom<boolean | null>(null);
 
 export const useGame = () => {
   const [board, setBoard] = useAtom(gameStateAtom);
   const [turn, setTurn] = useAtom(turnAtom);
   const [phase, setPhase] = useAtom(gamePhaseAtom);
+  const [, setWinner] = useAtom(winnerAtom);
   return {
     board,
     turn,
     phase,
     clickTile: (index: number) => {
+      if (phase === "ended") return;
       if (!board.canInteract(index, turn, phase)) return;
 
       if (phase === "placement") {
@@ -171,6 +190,12 @@ export const useGame = () => {
 
       const afterMove = board.increment([index], turn).progress();
       setBoard(afterMove);
+      const sole = Board.soleSurvivor(afterMove.tiles);
+      if (sole !== null) {
+        setPhase("ended");
+        setWinner(sole);
+        return;
+      }
       setTurn(!turn);
     },
   };
