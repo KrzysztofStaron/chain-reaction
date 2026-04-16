@@ -19,6 +19,7 @@ export type Explosion = {
 };
 
 export class Board {
+  /** Per-direction neighbor coordinate offsets */
   private static readonly OFFSETS: Record<
     Direction,
     ReadonlyArray<readonly [number, number]>
@@ -32,6 +33,7 @@ export class Board {
     readonly size: number,
   ) {}
 
+  /** Create an empty board */
   static create(size: number): Board {
     return new Board(
       Array.from({ length: size * size }, () => TileStateFactory()),
@@ -47,6 +49,32 @@ export class Board {
     return y * this.size + x;
   }
 
+  private withDraft(mutator: (draft: TileState[]) => void): Board {
+    const draft = this.tiles.slice();
+    mutator(draft);
+    return new Board(draft, this.size);
+  }
+
+  private neighborsForDirection(index: number, direction: Direction): number[] {
+    const [x, y] = this.toXY(index);
+    const offsets = Board.OFFSETS[direction];
+    const result: number[] = [];
+
+    for (const [dx, dy] of offsets) {
+      const nx = x + dx;
+      const ny = y + dy;
+      if (nx >= 0 && nx < this.size && ny >= 0 && ny < this.size) {
+        result.push(this.toIndex(nx, ny));
+      }
+    }
+
+    return result;
+  }
+
+  neighbors(index: number): number[] {
+    return this.neighborsForDirection(index, this.tiles[index].direction);
+  }
+
   canInteract(index: number, turn: boolean, phase: GamePhase): boolean {
     if (phase === "ended") return false;
     const tile = this.tiles[index];
@@ -57,12 +85,14 @@ export class Board {
   }
 
   placeInitial(index: number, player: boolean): Board {
-    const next: TileState[] = this.tiles.map((tile, idx) =>
-      idx === index
-        ? { direction: tile.direction, player, value: INITIAL_ORB_VALUE }
-        : tile,
-    );
-    return new Board(next, this.size);
+    const tile = this.tiles[index];
+    return this.withDraft((draft) => {
+      draft[index] = {
+        direction: tile.direction,
+        player,
+        value: INITIAL_ORB_VALUE,
+      };
+    });
   }
 
   static tilesEqual(
@@ -107,40 +137,36 @@ export class Board {
     return null;
   }
 
-  neighbors(index: number): number[] {
-    const inBounds = (x: number, y: number): boolean =>
-      x >= 0 && x < this.size && y >= 0 && y < this.size;
-
-    const [x, y] = this.toXY(index);
-    const offsets = Board.OFFSETS[this.tiles[index].direction];
-    return offsets
-      .map(([dx, dy]) => [x + dx, y + dy] as const)
-      .filter(([nx, ny]) => inBounds(nx, ny))
-      .map(([nx, ny]) => this.toIndex(nx, ny));
-  }
-
   increment(indices: number[], player: boolean): Board {
     const set = new Set(indices);
-    const next: TileState[] = this.tiles.map((tile, idx) =>
-      set.has(idx)
-        ? { direction: tile.direction, value: tile.value + 1, player }
-        : tile,
-    );
+    if (set.size === 0) return this;
 
-    return new Board(next, this.size);
+    return this.withDraft((draft) => {
+      for (const idx of set) {
+        const tile = draft[idx];
+        draft[idx] = {
+          direction: tile.direction,
+          value: tile.value + 1,
+          player,
+        };
+      }
+    });
   }
 
   editTile(index: number, fn: (tile: TileState) => TileState): Board {
-    const next: TileState[] = this.tiles.map((tile, idx) =>
-      idx === index ? fn(tile) : tile,
-    );
-    return new Board(next, this.size);
+    const updated = fn(this.tiles[index]);
+    if (updated === this.tiles[index]) return this;
+
+    return this.withDraft((draft) => {
+      draft[index] = updated;
+    });
   }
 
   scan(): number[] | null {
-    const unstable = this.tiles
-      .map((tile, idx) => (tile.value >= 4 ? idx : -1))
-      .filter((idx) => idx !== -1);
+    const unstable: number[] = [];
+    for (let idx = 0; idx < this.tiles.length; idx++) {
+      if (this.tiles[idx].value >= 4) unstable.push(idx);
+    }
     return unstable.length > 0 ? unstable : null;
   }
 
@@ -156,33 +182,34 @@ export class Board {
       return { board: this, explosions: [] };
     }
 
-    let nextBoard: Board = this;
+    const nextTiles = this.tiles.slice();
     const explosions: Explosion[] = [];
 
     unstableTiles.forEach((unstableIdx) => {
-      const tile = nextBoard.tiles[unstableIdx];
+      const tile = nextTiles[unstableIdx];
       const owner = tile.player;
       if (owner === null) return;
 
       const magnitude = Math.min(tile.value - 3, 4);
-      const neighbors = nextBoard.neighbors(unstableIdx);
+      const neighbors = this.neighborsForDirection(unstableIdx, tile.direction);
       const targets = neighbors.flatMap((n) =>
         Array<number>(magnitude).fill(n),
       );
       explosions.push({ from: unstableIdx, owner, targets });
 
       neighbors.forEach((idx) => {
-        nextBoard = nextBoard.editTile(idx, (t) => ({
-          ...t,
-          value: t.value + magnitude,
+        const neighbor = nextTiles[idx];
+        nextTiles[idx] = {
+          direction: neighbor.direction,
+          value: neighbor.value + magnitude,
           player: owner,
-        }));
+        };
       });
 
-      nextBoard = nextBoard.editTile(unstableIdx, () => TileStateFactory());
+      nextTiles[unstableIdx] = TileStateFactory();
     });
 
-    return { board: nextBoard, explosions };
+    return { board: new Board(nextTiles, this.size), explosions };
   }
 }
 
