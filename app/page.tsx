@@ -13,16 +13,26 @@ import { useAtom } from "jotai";
 const GameBoard = () => {
   const { board, clickTile } = useGame();
 
-  const onBoardClick = (e: MouseEvent<HTMLDivElement>) => {
+  const handleTileClick = (e: MouseEvent<HTMLDivElement>, leftClick: boolean) => {
     const target = (e.target as HTMLElement).closest<HTMLElement>("[data-tile-id]");
     if (!target) return;
-    clickTile(Number(target.dataset.tileId));
+    clickTile(Number(target.dataset.tileId), leftClick);
+  };
+
+  const onBoardClick = (e: MouseEvent<HTMLDivElement>) => {
+    handleTileClick(e, true);
+  };
+
+  const onBoardContextMenu = (e: MouseEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    handleTileClick(e, false);
   };
 
   return (
     <div
       className="game grid"
       onClick={onBoardClick}
+      onContextMenu={onBoardContextMenu}
       style={{
         gridTemplateColumns: `repeat(${board.size}, minmax(0, 1fr))`,
         gridTemplateRows: `repeat(${board.size}, minmax(0, 1fr))`,

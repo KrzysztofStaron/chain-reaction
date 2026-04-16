@@ -170,7 +170,7 @@ export const useGame = () => {
     board,
     turn,
     phase,
-    clickTile: (index: number) => {
+    clickTile: (index: number, leftClick: boolean) => {
       if (phase === "ended") return;
       if (!board.canInteract(index, turn, phase)) return;
 
@@ -188,7 +188,23 @@ export const useGame = () => {
 
       // playing phase
 
-      const afterMove = board.increment([index], turn).progress();
+      const afterMove = board
+        .editTile(index, (tile) => {
+          const nextDirection = leftClick
+            ? tile.direction
+            : tile.direction === "orthogonal"
+              ? "diagonal"
+              : "orthogonal";
+            
+          return {
+            direction: nextDirection,
+            value: tile.value + 1,
+            player: turn,
+          };
+        })
+        .progress();
+ 
+
       setBoard(afterMove);
       const sole = Board.soleSurvivor(afterMove.tiles);
       if (sole !== null) {
