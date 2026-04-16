@@ -6,7 +6,16 @@ export const BOARD_SIZE = 5;
 /** Value of each player's first orb when placed during the opening phase */
 export const INITIAL_ORB_VALUE = 3;
 
+/** Duration of a single propagation wave animation, ms */
+export const PROGRESS_STEP_MS = 500;
+
 export type GamePhase = "placement" | "playing" | "ended";
+
+export type Explosion = {
+  from: number;
+  owner: boolean;
+  targets: number[];
+};
 
 export class Board {
   private static readonly OFFSETS: Record<
@@ -117,24 +126,28 @@ export class Board {
     return unstable.length > 0 ? unstable : null;
   }
 
-  progress(): Board {
-    // Find all unstable tiles
+  /**
+   * Applies a single wave of propagation: every currently-unstable tile
+   * splits once, pushing an orb to each neighbor. Returns the resulting
+   * board along with the explosions that occurred (for animation).
+   */
+  progressStep(): { board: Board; explosions: Explosion[] } {
     const crazyTiles = this.scan();
     if (!crazyTiles) {
-      return this;
+      return { board: this, explosions: [] };
     }
 
     let nextBoard: Board = this;
+    const explosions: Explosion[] = [];
 
     crazyTiles.forEach((crazyIdx) => {
       const owner = nextBoard.tiles[crazyIdx].player;
-      if (owner === null) {
-        // skip: don't propagate from empty tile
-        return;
-      }
+      if (owner === null) return;
 
-      // First, increment each neighbor by 1 and set their owner
-      nextBoard.neighbors(crazyIdx).forEach((idx) => {
+      const targets = nextBoard.neighbors(crazyIdx);
+      explosions.push({ from: crazyIdx, owner, targets });
+
+      targets.forEach((idx) => {
         nextBoard = nextBoard.editTile(idx, (tile) => ({
           ...tile,
           value: tile.value + 1,
@@ -142,16 +155,10 @@ export class Board {
         }));
       });
 
-      // Then, clear the source tile (reset to default)
       nextBoard = nextBoard.editTile(crazyIdx, () => TileStateFactory());
     });
-    
-    // If new unstable tiles were created in the process then run again
-    if (nextBoard.scan()) {
-      nextBoard = nextBoard.progress();
-    }
-    
-    return nextBoard;
+
+    return { board: nextBoard, explosions };
   }
 }
 
@@ -160,18 +167,72 @@ export const turnAtom = atom(true);
 export const gamePhaseAtom = atom<GamePhase>("placement");
 /** Set when `phase === "ended"`: `true` = player 1 won, `false` = player 2 */
 export const winnerAtom = atom<boolean | null>(null);
+/** Explosions currently animating on the board. Empty when idle. */
+export const explosionsAtom = atom<Explosion[]>([]);
+/** `true` while a chain-reaction animation is playing. Blocks input. */
+export const animatingAtom = atom(false);
 
 export const useGame = () => {
   const [board, setBoard] = useAtom(gameStateAtom);
   const [turn, setTurn] = useAtom(turnAtom);
   const [phase, setPhase] = useAtom(gamePhaseAtom);
   const [, setWinner] = useAtom(winnerAtom);
+  const [, setExplosions] = useAtom(explosionsAtom);
+  const [animating, setAnimating] = useAtom(animatingAtom);
+
+  const runChainReaction = (startBoard: Board, nextTurn: boolean) => {
+    setAnimating(true);
+
+    const step = (current: Board) => {
+      const { board: next, explosions } = current.progressStep();
+
+      if (explosions.length === 0) {
+        setExplosions([]);
+        setBoard(current);
+        setAnimating(false);
+
+        const sole = Board.soleSurvivor(current.tiles);
+        if (sole !== null) {
+          setPhase("ended");
+          setWinner(sole);
+          return;
+        }
+        setTurn(nextTurn);
+        return;
+      }
+
+      setBoard(current);
+      setExplosions(explosions);
+
+      setTimeout(() => {
+        setExplosions([]);
+        setBoard(next);
+
+        if (Board.soleSurvivor(next.tiles) !== null) {
+          setAnimating(false);
+          const sole = Board.soleSurvivor(next.tiles);
+          if (sole !== null) {
+            setPhase("ended");
+            setWinner(sole);
+          }
+          return;
+        }
+
+        step(next);
+      }, PROGRESS_STEP_MS);
+    };
+
+    step(startBoard);
+  };
+
   return {
     board,
     turn,
     phase,
+    animating,
     clickTile: (index: number, leftClick: boolean) => {
       if (phase === "ended") return;
+      if (animating) return;
       if (!board.canInteract(index, turn, phase)) return;
 
       if (phase === "placement") {
@@ -186,33 +247,21 @@ export const useGame = () => {
         return;
       }
 
-      // playing phase
+      const afterMove = board.editTile(index, (tile) => {
+        const nextDirection = leftClick
+          ? tile.direction
+          : tile.direction === "orthogonal"
+            ? "diagonal"
+            : "orthogonal";
 
-      const afterMove = board
-        .editTile(index, (tile) => {
-          const nextDirection = leftClick
-            ? tile.direction
-            : tile.direction === "orthogonal"
-              ? "diagonal"
-              : "orthogonal";
-            
-          return {
-            direction: nextDirection,
-            value: tile.value + 1,
-            player: turn,
-          };
-        })
-        .progress();
- 
+        return {
+          direction: nextDirection,
+          value: tile.value + 1,
+          player: turn,
+        };
+      });
 
-      setBoard(afterMove);
-      const sole = Board.soleSurvivor(afterMove.tiles);
-      if (sole !== null) {
-        setPhase("ended");
-        setWinner(sole);
-        return;
-      }
-      setTurn(!turn);
+      runChainReaction(afterMove, !turn);
     },
   };
 };

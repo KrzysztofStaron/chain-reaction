@@ -1,7 +1,8 @@
 "use client";
 
-import { type MouseEvent } from "react";
+import { type MouseEvent, useRef } from "react";
 import GameTile from "./components/GameTile";
+import ExplosionOverlay from "./components/ExplosionOverlay";
 import {
   gamePhaseAtom,
   turnAtom,
@@ -11,7 +12,8 @@ import {
 import { useAtom } from "jotai";
 
 const GameBoard = () => {
-  const { board, clickTile } = useGame();
+  const { board, clickTile, animating } = useGame();
+  const boardRef = useRef<HTMLDivElement>(null);
 
   const handleTileClick = (e: MouseEvent<HTMLDivElement>, leftClick: boolean) => {
     const target = (e.target as HTMLElement).closest<HTMLElement>("[data-tile-id]");
@@ -30,7 +32,8 @@ const GameBoard = () => {
 
   return (
     <div
-      className="game grid"
+      ref={boardRef}
+      className={`game grid relative ${animating ? "pointer-events-none" : ""}`}
       onClick={onBoardClick}
       onContextMenu={onBoardContextMenu}
       style={{
@@ -42,6 +45,7 @@ const GameBoard = () => {
       {board.tiles.map((tileState, idx) => (
         <GameTile key={idx} id={idx} tileState={tileState} />
       ))}
+      <ExplosionOverlay boardRef={boardRef} />
     </div>
   );
 };

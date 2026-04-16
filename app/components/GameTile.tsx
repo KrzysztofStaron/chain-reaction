@@ -4,40 +4,49 @@ import { TileState } from './types';
 const DirectionIcon = ({ direction }: { direction: TileState['direction'] }) => (
   <svg
     aria-hidden
-    className={`pointer-events-none absolute bottom-1 right-1 size-3.5 shrink-0 text-black/45 ${
+    className={`pointer-events-none absolute inset-0 w-full h-full text-black/20 ${
       direction === 'diagonal' ? 'rotate-45' : ''
     }`}
     viewBox="0 0 24 24"
     fill="none"
     stroke="currentColor"
-    strokeWidth="2.25"
+    strokeWidth="1.5"
     strokeLinecap="round"
+    strokeLinejoin="round"
   >
-    <path d="M12 5v14M5 12h14" />
+    <path d="M12 7V3M9 6l3-3 3 3" />
+    <path d="M12 17v4M9 18l3 3 3-3" />
+    <path d="M7 12H3M6 9l-3 3 3 3" />
+    <path d="M17 12h4M18 9l3 3-3 3" />
   </svg>
 );
 
 const GameTile = ({ id, tileState }: { id: number; tileState: TileState }) => {
+  const bgClass =
+    tileState.player === null
+      ? 'bg-white/90 hover:bg-white/70'
+      : tileState.player
+        ? 'bg-player-1-orb hover:bg-player-1-orb/80'
+        : 'bg-player-2-orb hover:bg-player-2-orb/80';
+
+  const fgClass = tileState.player === null ? 'text-black' : 'text-white';
+
   return (
     <div
       id={`tile_${id}`}
       data-tile-id={id}
-      className="relative bg-white/90 rounded-[14px] aspect-square shadow-md size-15 hover:bg-white/70 cursor-pointer"
+      className={`relative rounded-[14px] aspect-square shadow-md size-15 cursor-pointer overflow-hidden flex items-center justify-center transition-colors ${bgClass}`}
     >
-      <DirectionIcon direction={tileState.direction} />
-      {tileState.player !== null && (
-        <div
-          className={`absolute inset-2 rounded-full text-black flex items-center justify-center ${
-            tileState.player === true ? "bg-player-1-orb" : "bg-player-2-orb"
-          }`}
-        >
-             {tileState.value}
-        </div>
+      {tileState.value > 0 && (
+        <>
+          <DirectionIcon direction={tileState.direction} />
+          <span className={`text-lg font-semibold ${fgClass}`}>
+            {tileState.value}
+          </span>
+        </>
       )}
-
-   
     </div>
   );
-};
+}
 
 export default GameTile;
