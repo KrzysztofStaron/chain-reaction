@@ -64,6 +64,23 @@ export class Board {
     return new Board(next, this.size);
   }
 
+  static tilesEqual(
+    a: readonly TileState[],
+    b: readonly TileState[],
+  ): boolean {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (
+        a[i].value !== b[i].value ||
+        a[i].player !== b[i].player ||
+        a[i].direction !== b[i].direction
+      ) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   static bothPlayersPresent(tiles: readonly TileState[]): boolean {
     let hasP1 = false;
     let hasP2 = false;
@@ -121,15 +138,16 @@ export class Board {
 
   scan(): number[] | null {
     const unstable = this.tiles
-      .map((tile, idx) => (tile.value === 4 ? idx : -1))
+      .map((tile, idx) => (tile.value >= 4 ? idx : -1))
       .filter((idx) => idx !== -1);
     return unstable.length > 0 ? unstable : null;
   }
 
   /**
    * Applies a single wave of propagation: every currently-unstable tile
-   * splits once, pushing an orb to each neighbor. Returns the resulting
-   * board along with the explosions that occurred (for animation).
+   * splits once, pushing `value - 3` orbs to each neighbor (so 4 pushes 1,
+   * 5 pushes 2, etc.). Returns the resulting board along with the
+   * explosions that occurred (for animation).
    */
   progressStep(): { board: Board; explosions: Explosion[] } {
     const crazyTiles = this.scan();
@@ -140,31 +158,47 @@ export class Board {
     let nextBoard: Board = this;
     const explosions: Explosion[] = [];
 
-    crazyTiles.forEach((crazyIdx) => {
-      const owner = nextBoard.tiles[crazyIdx].player;
+    crazyTiles.forEach((unstableIdx) => {
+      const tile = nextBoard.tiles[unstableIdx];
+      const owner = tile.player;
       if (owner === null) return;
 
-      const targets = nextBoard.neighbors(crazyIdx);
-      explosions.push({ from: crazyIdx, owner, targets });
+      const magnitude = Math.min(tile.value - 3, 4);
+      const neighbors = nextBoard.neighbors(unstableIdx);
+      const targets = neighbors.flatMap((n) =>
+        Array<number>(magnitude).fill(n),
+      );
+      explosions.push({ from: unstableIdx, owner, targets });
 
-      targets.forEach((idx) => {
-        nextBoard = nextBoard.editTile(idx, (tile) => ({
-          ...tile,
-          value: tile.value + 1,
+      neighbors.forEach((idx) => {
+        nextBoard = nextBoard.editTile(idx, (t) => ({
+          ...t,
+          value: t.value + magnitude,
           player: owner,
         }));
       });
 
-      nextBoard = nextBoard.editTile(crazyIdx, () => TileStateFactory());
+      nextBoard = nextBoard.editTile(unstableIdx, () => TileStateFactory());
     });
 
     return { board: nextBoard, explosions };
   }
 }
 
-export const gameStateAtom = atom<Board>(Board.create(BOARD_SIZE));
-export const turnAtom = atom(true);
-export const gamePhaseAtom = atom<GamePhase>("placement");
+const createDebugBoard = (): Board => {
+  const total = BOARD_SIZE * BOARD_SIZE;
+  const p2Index = Math.floor(total / 2);
+  const tiles: TileState[] = Array.from({ length: total }, (_, idx) => ({
+    direction: "orthogonal",
+    value: 3,
+    player: idx !== p2Index,
+  }));
+  return new Board(tiles, BOARD_SIZE);
+};
+
+export const gameStateAtom = atom<Board>(createDebugBoard());
+export const turnAtom = atom(false);
+export const gamePhaseAtom = atom<GamePhase>("playing");
 /** Set when `phase === "ended"`: `true` = player 1 won, `false` = player 2 */
 export const winnerAtom = atom<boolean | null>(null);
 /** Explosions currently animating on the board. Empty when idle. */
@@ -183,21 +217,35 @@ export const useGame = () => {
   const runChainReaction = (startBoard: Board, nextTurn: boolean) => {
     setAnimating(true);
 
+    const history: Board[] = [];
+
+    const resolve = (final: Board) => {
+      setExplosions([]);
+      setBoard(final);
+      setAnimating(false);
+
+      const sole = Board.soleSurvivor(final.tiles);
+      if (sole !== null) {
+        setPhase("ended");
+        setWinner(sole);
+        return;
+      }
+      setTurn(nextTurn);
+    };
+
     const step = (current: Board) => {
+      const twoAgo = history[0];
+      if (twoAgo && Board.tilesEqual(twoAgo.tiles, current.tiles)) {
+        resolve(current);
+        return;
+      }
+      history.push(current);
+      if (history.length > 2) history.shift();
+
       const { board: next, explosions } = current.progressStep();
 
       if (explosions.length === 0) {
-        setExplosions([]);
-        setBoard(current);
-        setAnimating(false);
-
-        const sole = Board.soleSurvivor(current.tiles);
-        if (sole !== null) {
-          setPhase("ended");
-          setWinner(sole);
-          return;
-        }
-        setTurn(nextTurn);
+        resolve(current);
         return;
       }
 
