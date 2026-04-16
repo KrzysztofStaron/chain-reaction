@@ -146,20 +146,20 @@ export class Board {
 
   /**
    * Applies a single wave of propagation: every currently-unstable tile
-   * splits once, pushing `value - 3` orbs to each neighbor (so 4 pushes 1,
-   * 5 pushes 2, etc.). Returns the resulting board along with the
-   * explosions that occurred (for animation).
+   * splits once, pushing `value - 3` orbs (capped at 4) to each neighbor.
+   * Returns the resulting board along with the explosions that occurred
+   * (for animation).
    */
   progressStep(): { board: Board; explosions: Explosion[] } {
-    const crazyTiles = this.scan();
-    if (!crazyTiles) {
+    const unstableTiles = this.scan();
+    if (!unstableTiles) {
       return { board: this, explosions: [] };
     }
 
     let nextBoard: Board = this;
     const explosions: Explosion[] = [];
 
-    crazyTiles.forEach((unstableIdx) => {
+    unstableTiles.forEach((unstableIdx) => {
       const tile = nextBoard.tiles[unstableIdx];
       const owner = tile.player;
       if (owner === null) return;
