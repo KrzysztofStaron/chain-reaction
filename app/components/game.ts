@@ -207,17 +207,6 @@ export const useGame = () => {
       setTimeout(() => {
         setExplosions([]);
         setBoard(next);
-
-        if (Board.soleSurvivor(next.tiles) !== null) {
-          setAnimating(false);
-          const sole = Board.soleSurvivor(next.tiles);
-          if (sole !== null) {
-            setPhase("ended");
-            setWinner(sole);
-          }
-          return;
-        }
-
         step(next);
       }, PROGRESS_STEP_MS);
     };
