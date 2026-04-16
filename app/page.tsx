@@ -2,21 +2,16 @@
 
 import { type MouseEvent } from "react";
 import GameTile from "./components/GameTile";
-import { atom, useAtom } from 'jotai';
-import { TileState, TileStateFactory } from "./components/types";
-import { createInitialBoard } from "./components/utils";
+import { turnAtom, useGame } from "./components/game";
+import { useAtom } from "jotai";
 
-const BOARDSIZE = 5;
-const gameStateAtom = atom<TileState[]>(createInitialBoard(BOARDSIZE));
-
-const GameBoard = ({size} : {size: number}) => {
-  const [gameState] = useAtom(gameStateAtom);
+const GameBoard = () => {
+  const { board, clickTile } = useGame();
 
   const onBoardClick = (e: MouseEvent<HTMLDivElement>) => {
     const target = (e.target as HTMLElement).closest<HTMLElement>("[data-tile-id]");
     if (!target) return;
-    const tileId = Number(target.dataset.tileId);
-    console.log(`Tile clicked: ${tileId}`);
+    clickTile(Number(target.dataset.tileId));
   };
 
   return (
@@ -24,22 +19,33 @@ const GameBoard = ({size} : {size: number}) => {
       className="game grid"
       onClick={onBoardClick}
       style={{
-        gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))`,
-        gridTemplateRows: `repeat(${size}, minmax(0, 1fr))`,
+        gridTemplateColumns: `repeat(${board.size}, minmax(0, 1fr))`,
+        gridTemplateRows: `repeat(${board.size}, minmax(0, 1fr))`,
         gap: "0.25rem",
       }}
     >
-      {gameState.map((tileState, idx) => (
+      {board.tiles.map((tileState, idx) => (
         <GameTile key={idx} id={idx} tileState={tileState} />
       ))}
     </div>
   );
-}
+};
 
 export default function Home() {
+  const [turn] = useAtom(turnAtom);
+
   return (
-    <div className="container w-screen h-screen flex items-center justify-center" style={{ backgroundColor: "#DE7356" }}>
-      <GameBoard size={BOARDSIZE}/>
+    <div className="container w-screen h-screen flex flex-col items-center justify-center gap-4" style={{ backgroundColor: "#DE7356" }}>
+      <div
+        className={`font-semibold text-lg px-5 py-2 rounded-full shadow-md border-2 ${
+          turn
+            ? "bg-player-1/90 text-player-1-fg border-player-1-border/80"
+            : "bg-player-2/90 text-player-2-fg border-player-2-border/80"
+        }`}
+      >
+        Turn: Player {turn ? 1 : 2}
+      </div>
+      <GameBoard />
     </div>
   );
 }

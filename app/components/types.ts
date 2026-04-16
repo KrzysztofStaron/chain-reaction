@@ -1,9 +1,11 @@
-export type TileState = {
-    value: number
-}
+export type Direction = "orthogonal" | "diagonal"
 
-export const TileStateFactory = () => {
-    return {
-        value: 0
-    }
-}
+export type TileState =
+    | { player: null, value: 0, direction: Direction }
+    | { player: boolean, value: number, direction: Direction }
+
+export const TileStateFactory = (): TileState => ({
+    value: 0,
+    direction: "orthogonal",
+    player: null,
+})

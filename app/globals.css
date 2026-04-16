@@ -4,11 +4,30 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+
+  /* Player palette — edit here; Tailwind uses these via @theme below */
+  --player-1: #134e4a;
+  --player-1-fg: #f0fdfa;
+  --player-1-border: #2dd4bf;
+  --player-1-orb: #14b8a8;
+
+  --player-2: #78350f;
+  --player-2-fg: #fffbeb;
+  --player-2-border: #fbbf24;
+  --player-2-orb: #f59e0b;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-player-1: var(--player-1);
+  --color-player-1-fg: var(--player-1-fg);
+  --color-player-1-border: var(--player-1-border);
+  --color-player-1-orb: var(--player-1-orb);
+  --color-player-2: var(--player-2);
+  --color-player-2-fg: var(--player-2-fg);
+  --color-player-2-border: var(--player-2-border);
+  --color-player-2-orb: var(--player-2-orb);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
