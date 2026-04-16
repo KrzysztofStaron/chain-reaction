@@ -268,7 +268,6 @@ export const useGame = () => {
 
         if (Board.bothPlayersPresent(nextBoard.tiles)) {
           setPhase("playing");
-          setTurn(true);
         }
         return;
       }
