@@ -1,4 +1,5 @@
 import { atom, useAtom } from "jotai";
+import { useState } from "react";
 import { Direction, TileState, TileStateFactory } from "./types";
 
 export const BOARD_SIZE = 5;
@@ -185,23 +186,20 @@ export class Board {
   }
 }
 
-export const gameStateAtom = atom<Board>(Board.create(BOARD_SIZE));
 export const turnAtom = atom(Math.random() < 0.5);
 export const gamePhaseAtom = atom<GamePhase>("placement");
 /** Set when `phase === "ended"`: `true` = player 1 won, `false` = player 2 */
 export const winnerAtom = atom<boolean | null>(null);
 /** Explosions currently animating on the board. Empty when idle. */
 export const explosionsAtom = atom<Explosion[]>([]);
-/** `true` while a chain-reaction animation is playing. Blocks input. */
-export const animatingAtom = atom(false);
 
 export const useGame = () => {
-  const [board, setBoard] = useAtom(gameStateAtom);
+  const [board, setBoard] = useState<Board>(() => Board.create(BOARD_SIZE));
+  const [animating, setAnimating] = useState(false);
   const [turn, setTurn] = useAtom(turnAtom);
   const [phase, setPhase] = useAtom(gamePhaseAtom);
   const [, setWinner] = useAtom(winnerAtom);
   const [, setExplosions] = useAtom(explosionsAtom);
-  const [animating, setAnimating] = useAtom(animatingAtom);
 
   const runChainReaction = (startBoard: Board, nextTurn: boolean) => {
     setAnimating(true);
