@@ -33,6 +33,7 @@ import torch.nn.functional as F
 import wandb
 from huggingface_hub import HfApi
 from torch.optim import AdamW
+from tqdm import tqdm
 
 from encode import batch_encode_and_mask, encode, initial_state, legal_mask
 from game import Game, Phase
@@ -86,6 +87,7 @@ def run_selfplay_batch(
     max_steps: int = 200,
     temperature: float = 1.0,
     use_amp: bool = False,
+    show_progress: bool = True,
 ) -> list[Trajectory]:
     model.eval()
 
@@ -94,62 +96,81 @@ def run_selfplay_batch(
     trajectories: list[Trajectory] = [Trajectory() for _ in range(num_games)]
     active = [True] * num_games
 
-    for _ in range(max_steps):
-        active_indices = [i for i, a in enumerate(active) if a]
-        if not active_indices:
-            break
+    pbar = tqdm(
+        total=num_games,
+        desc="self-play",
+        unit="game",
+        leave=False,
+        disable=not show_progress,
+        bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}{postfix}]",
+    )
+    prev_done = 0
+    try:
+        for step in range(max_steps):
+            active_indices = [i for i, a in enumerate(active) if a]
+            if not active_indices:
+                break
 
-        active_states = [states[i] for i in active_indices]
-        batch_cpu, masks_cpu = batch_encode_and_mask(active_states)
+            active_states = [states[i] for i in active_indices]
+            batch_cpu, masks_cpu = batch_encode_and_mask(active_states)
 
-        if device.type == "cuda":
-            batch_cpu = batch_cpu.pin_memory()
-            masks_cpu = masks_cpu.pin_memory()
+            if device.type == "cuda":
+                batch_cpu = batch_cpu.pin_memory()
+                masks_cpu = masks_cpu.pin_memory()
 
-        batch = batch_cpu.to(device, non_blocking=True)
-        masks = masks_cpu.to(device, non_blocking=True)
+            batch = batch_cpu.to(device, non_blocking=True)
+            masks = masks_cpu.to(device, non_blocking=True)
 
-        amp_ctx = (
-            torch.autocast(device_type="cuda", dtype=torch.bfloat16)
-            if use_amp and device.type == "cuda"
-            else torch.autocast(device_type="cpu", enabled=False)
-        )
-        with amp_ctx:
-            logits, _ = model(batch)
-
-        logits = logits.float().masked_fill(~masks, float("-inf"))
-
-        if temperature <= 0.0:
-            actions_t = logits.argmax(dim=-1)
-        else:
-            # Gumbel-max trick: argmax(logits/T + Gumbel) ~ Categorical(softmax(logits/T)).
-            # Avoids torch.multinomial (buggy on MPS) and softmax-of-(-inf) rows
-            # returning NaN on some MPS builds. -inf + finite stays -inf, so
-            # illegal moves can never win the argmax.
-            u = torch.rand_like(logits).clamp_(min=1e-20, max=1.0 - 1e-7)
-            gumbel = -torch.log(-torch.log(u))
-            actions_t = (logits / temperature + gumbel).argmax(dim=-1)
-
-        actions = actions_t.cpu().tolist()
-
-        for slot, i in enumerate(active_indices):
-            a = actions[slot]
-            s = states[i]
-            trajectories[i].steps.append(
-                Step(
-                    # Clone rows so we do not retain every timestep's full
-                    # [N,4,5,5] batch tensor in memory (was blowing up RAM/GC).
-                    state_tensor=batch_cpu[slot].clone(),
-                    legal=masks_cpu[slot].clone(),
-                    action=a,
-                    player=s.turn,
-                )
+            amp_ctx = (
+                torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+                if use_amp and device.type == "cuda"
+                else torch.autocast(device_type="cpu", enabled=False)
             )
-            new_state = games[i].click_tile(a % 5, a // 5)
-            states[i] = new_state
-            if new_state.phase is Phase.ENDED or not new_state.accepted:
-                trajectories[i].winner = new_state.winner
-                active[i] = False
+            with amp_ctx:
+                logits, _ = model(batch)
+
+            logits = logits.float().masked_fill(~masks, float("-inf"))
+
+            if temperature <= 0.0:
+                actions_t = logits.argmax(dim=-1)
+            else:
+                # Gumbel-max trick: argmax(logits/T + Gumbel) ~ Categorical(softmax(logits/T)).
+                # Avoids torch.multinomial (buggy on MPS) and softmax-of-(-inf) rows
+                # returning NaN on some MPS builds. -inf + finite stays -inf, so
+                # illegal moves can never win the argmax.
+                u = torch.rand_like(logits).clamp_(min=1e-20, max=1.0 - 1e-7)
+                gumbel = -torch.log(-torch.log(u))
+                actions_t = (logits / temperature + gumbel).argmax(dim=-1)
+
+            actions = actions_t.cpu().tolist()
+
+            for slot, i in enumerate(active_indices):
+                a = actions[slot]
+                s = states[i]
+                trajectories[i].steps.append(
+                    Step(
+                        # Clone rows so we do not retain every timestep's full
+                        # [N,4,5,5] batch tensor in memory (was blowing up RAM/GC).
+                        state_tensor=batch_cpu[slot].clone(),
+                        legal=masks_cpu[slot].clone(),
+                        action=a,
+                        player=s.turn,
+                    )
+                )
+                new_state = games[i].click_tile(a % 5, a // 5)
+                states[i] = new_state
+                if new_state.phase is Phase.ENDED or not new_state.accepted:
+                    trajectories[i].winner = new_state.winner
+                    active[i] = False
+
+            n_done = num_games - sum(active)
+            if n_done > prev_done:
+                pbar.update(n_done - prev_done)
+                prev_done = n_done
+            pbar.set_postfix_str(f"active={sum(active)} step={step}")
+
+    finally:
+        pbar.close()
 
     return trajectories
 
@@ -370,6 +391,11 @@ def main() -> None:
     parser.add_argument("--hf-repo", type=str, default="PanzerBread/chain-reaction")
     parser.add_argument("--no-wandb", action="store_true")
     parser.add_argument("--no-hf", action="store_true")
+    parser.add_argument(
+        "--no-progress",
+        action="store_true",
+        help="Disable tqdm self-play progress bar (cleaner logs / non-TTY).",
+    )
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
@@ -433,6 +459,7 @@ def main() -> None:
             max_steps=args.max_steps,
             temperature=args.temperature,
             use_amp=use_amp,
+            show_progress=not args.no_progress,
         )
         t_play = time.time() - t0
 
