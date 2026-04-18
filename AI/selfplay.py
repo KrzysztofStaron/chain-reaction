@@ -34,7 +34,7 @@ import wandb
 from huggingface_hub import HfApi
 from torch.optim import AdamW
 
-from encode import encode, initial_state, legal_mask
+from encode import batch_encode_and_mask, encode, initial_state, legal_mask
 from game import Game, Phase
 from play import ChainReactionNet
 
@@ -99,14 +99,11 @@ def run_selfplay_batch(
         if not active_indices:
             break
 
-        batch_tensors = [
-            encode(states[i], states[i].turn, states[i].phase is Phase.PLACEMENT)
-            for i in active_indices
-        ]
-        batch_masks = [legal_mask(states[i]) for i in active_indices]
+        active_states = [states[i] for i in active_indices]
+        batch_cpu, masks_cpu = batch_encode_and_mask(active_states)
 
-        batch = torch.stack(batch_tensors).to(device, non_blocking=True)
-        masks = torch.stack(batch_masks).to(device, non_blocking=True)
+        batch = batch_cpu.to(device, non_blocking=True)
+        masks = masks_cpu.to(device, non_blocking=True)
 
         if device.type == "cuda":
             batch = batch.to(memory_format=torch.channels_last)
@@ -139,8 +136,8 @@ def run_selfplay_batch(
             s = states[i]
             trajectories[i].steps.append(
                 Step(
-                    state_tensor=batch_tensors[slot],
-                    legal=batch_masks[slot],
+                    state_tensor=batch_cpu[slot],
+                    legal=masks_cpu[slot],
                     action=a,
                     player=s.turn,
                 )

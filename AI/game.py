@@ -1,25 +1,28 @@
 """
-Chain Reaction - pure-compute Python port.
+Chain Reaction - pure-compute Python port (optimized).
 
 The public surface of `Game` is intentionally tiny:
     - __init__(size=5)
     - click_tile(x, y) -> GameState
 
-Everything else (chain-reaction propagation, win detection, phase
-transitions) is computed synchronously inside `click_tile`. No
-animation, no callbacks, no timers.
+Internally the board is stored as two flat lists (values, players) to
+avoid frozen-dataclass allocation in the chain-reaction loop. GameState
+exposes the raw tuples for fast access; Tile objects are only created
+on-demand via `tile_at()` or the `tiles` property.
 """
 
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
 
 BOARD_SIZE = 5
 INITIAL_ORB_VALUE = 3
+
+_N = BOARD_SIZE * BOARD_SIZE  # 25
 
 
 class Phase(str, Enum):
@@ -28,39 +31,69 @@ class Phase(str, Enum):
     ENDED = "ended"
 
 
-# Player 1 = True, Player 2 = False, empty = None
 Player = Optional[bool]
 
 
-_OFFSETS: tuple[tuple[int, int], ...] = ((0, -1), (0, 1), (-1, 0), (1, 0))
-
-
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Tile:
     value: int = 0
     player: Player = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class GameState:
-    """Immutable snapshot returned by `click_tile`."""
-    tiles: tuple[Tile, ...]
+    """Immutable snapshot returned by `click_tile`.
+
+    The board data is stored as raw tuples for fast access:
+        values[i]  — orb value at flat index i (0 if empty)
+        players[i] — owner at flat index i (True/False/None)
+    Tile objects are only created when you call `tile_at` or `tiles`.
+    """
+    values: tuple[int, ...]
+    players: tuple
     size: int
     turn: bool
     phase: Phase
     winner: Player = None
-    # True if the most recent click was accepted; False if ignored
-    # (wrong phase, wrong player, ended, out of bounds, ...).
     accepted: bool = True
 
+    @property
+    def tiles(self) -> tuple[Tile, ...]:
+        vs, ps = self.values, self.players
+        return tuple(Tile(vs[i], ps[i]) for i in range(len(vs)))
+
     def tile_at(self, x: int, y: int) -> Tile:
-        return self.tiles[y * self.size + x]
+        idx = y * self.size + x
+        return Tile(self.values[idx], self.players[idx])
+
+
+# ---------------------------------------------------------------------------
+# Precomputed neighbor table (module-level, computed once)
+# ---------------------------------------------------------------------------
+def _build_neighbor_table(size: int) -> tuple[tuple[int, ...], ...]:
+    offsets = ((0, -1), (0, 1), (-1, 0), (1, 0))
+    table: list[tuple[int, ...]] = []
+    for i in range(size * size):
+        x, y = i % size, i // size
+        nb: list[int] = []
+        for dx, dy in offsets:
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < size and 0 <= ny < size:
+                nb.append(ny * size + nx)
+        table.append(tuple(nb))
+    return tuple(table)
+
+
+_NEIGHBORS: tuple[tuple[int, ...], ...] = _build_neighbor_table(BOARD_SIZE)
 
 
 class Game:
+    __slots__ = ("_size", "_values", "_players", "_turn", "_phase", "_winner")
+
     def __init__(self, size: int = BOARD_SIZE, first_player: Optional[bool] = None) -> None:
         self._size = size
-        self._tiles: list[Tile] = [Tile() for _ in range(size * size)]
+        self._values: list[int] = [0] * _N
+        self._players: list[Player] = [None] * _N
         self._turn: bool = random.random() < 0.5 if first_player is None else first_player
         self._phase: Phase = Phase.PLACEMENT
         self._winner: Player = None
@@ -69,141 +102,118 @@ class Game:
     # Public API
     # ------------------------------------------------------------------
     def click_tile(self, x: int, y: int) -> GameState:
-        if not self._in_bounds(x, y) or self._phase is Phase.ENDED:
-            return self._snapshot(accepted=False)
+        if not (0 <= x < self._size and 0 <= y < self._size) or self._phase is Phase.ENDED:
+            return self._snapshot(False)
 
-        index = self._to_index(x, y)
-        tile = self._tiles[index]
+        idx = y * self._size + x
 
-        if not self._can_interact(tile):
-            return self._snapshot(accepted=False)
+        if not self._can_interact(idx):
+            return self._snapshot(False)
 
         if self._phase is Phase.PLACEMENT:
-            self._place_initial(index)
-            return self._snapshot(accepted=True)
+            self._place_initial(idx)
+            return self._snapshot(True)
 
-        self._apply_click(index)
+        self._apply_click(idx)
         self._run_chain_reaction()
         self._finalize_turn()
-        return self._snapshot(accepted=True)
+        return self._snapshot(True)
 
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
-    def _in_bounds(self, x: int, y: int) -> bool:
-        return 0 <= x < self._size and 0 <= y < self._size
-
-    def _to_index(self, x: int, y: int) -> int:
-        return y * self._size + x
-
-    def _to_xy(self, index: int) -> tuple[int, int]:
-        return index % self._size, index // self._size
-
-    def _neighbors(self, index: int) -> list[int]:
-        x, y = self._to_xy(index)
-        result: list[int] = []
-        for dx, dy in _OFFSETS:
-            nx, ny = x + dx, y + dy
-            if 0 <= nx < self._size and 0 <= ny < self._size:
-                result.append(self._to_index(nx, ny))
-        return result
-
-    def _can_interact(self, tile: Tile) -> bool:
+    def _can_interact(self, idx: int) -> bool:
         if self._phase is Phase.PLACEMENT:
-            return tile.player is None and tile.value == 0
-        return tile.player == self._turn
+            return self._players[idx] is None
+        return self._players[idx] == self._turn
 
-    def _place_initial(self, index: int) -> None:
-        self._tiles[index] = replace(self._tiles[index], value=INITIAL_ORB_VALUE, player=self._turn)
+    def _place_initial(self, idx: int) -> None:
+        self._values[idx] = INITIAL_ORB_VALUE
+        self._players[idx] = self._turn
         self._turn = not self._turn
-        if self._both_players_present():
-            self._phase = Phase.PLAYING
-
-    def _apply_click(self, index: int) -> None:
-        tile = self._tiles[index]
-        self._tiles[index] = Tile(value=tile.value + 1, player=self._turn)
-
-    def _scan_unstable(self) -> list[int]:
-        return [i for i, t in enumerate(self._tiles) if t.value >= 4]
-
-    def _progress_step(self) -> bool:
-        """Apply one wave of propagation. Returns True if anything exploded."""
-        unstable = self._scan_unstable()
-        if not unstable:
-            return False
-
-        for idx in unstable:
-            tile = self._tiles[idx]
-            owner = tile.player
-            if owner is None:
-                continue
-
-            magnitude = min(tile.value - 3, 4)
-            for n_idx in self._neighbors(idx):
-                n = self._tiles[n_idx]
-                self._tiles[n_idx] = Tile(value=n.value + magnitude, player=owner)
-            self._tiles[idx] = Tile()
-        return True
-
-    def _run_chain_reaction(self) -> None:
-        """Resolve waves until the board stabilizes or oscillates.
-
-        We keep the last two snapshots; if the current board matches the
-        one from two steps ago, the reaction is oscillating and we stop.
-        """
-        history: list[tuple[Tile, ...]] = []
-
-        while True:
-            current = tuple(self._tiles)
-            if len(history) == 2 and history[0] == current:
-                return
-            history.append(current)
-            if len(history) > 2:
-                history.pop(0)
-
-            if not self._progress_step():
-                return
-
-            if self._sole_survivor() is not None:
-                return
-
-    def _both_players_present(self) -> bool:
+        p = self._players
         has_p1 = has_p2 = False
-        for t in self._tiles:
-            if t.player is True:
+        for i in range(_N):
+            pi = p[i]
+            if pi is True:
                 has_p1 = True
-            elif t.player is False:
+            elif pi is False:
                 has_p2 = True
             if has_p1 and has_p2:
-                return True
-        return False
+                self._phase = Phase.PLAYING
+                return
 
-    def _sole_survivor(self) -> Player:
-        """True/False if only one player has orbs, None otherwise."""
-        has_p1 = has_p2 = False
-        for t in self._tiles:
-            if t.player is True:
-                has_p1 = True
-            elif t.player is False:
-                has_p2 = True
-        if has_p1 and not has_p2:
-            return True
-        if has_p2 and not has_p1:
-            return False
-        return None
+    def _apply_click(self, idx: int) -> None:
+        self._values[idx] += 1
+
+    def _run_chain_reaction(self) -> None:
+        """Resolve waves until the board stabilizes or oscillates."""
+        vals = self._values
+        plrs = self._players
+
+        prev2: tuple | None = None
+        prev1: tuple | None = None
+
+        while True:
+            current = (*vals, *plrs)
+            if prev2 is not None and prev2 == current:
+                return
+            prev2 = prev1
+            prev1 = current
+
+            unstable = [i for i in range(_N) if vals[i] >= 4]
+            if not unstable:
+                return
+
+            for idx in unstable:
+                owner = plrs[idx]
+                if owner is None:
+                    continue
+                mag = vals[idx] - 3
+                if mag > 4:
+                    mag = 4
+                for n in _NEIGHBORS[idx]:
+                    vals[n] += mag
+                    plrs[n] = owner
+                vals[idx] = 0
+                plrs[idx] = None
+
+            has_p1 = has_p2 = False
+            for i in range(_N):
+                pi = plrs[i]
+                if pi is True:
+                    has_p1 = True
+                elif pi is False:
+                    has_p2 = True
+                if has_p1 and has_p2:
+                    break
+            if has_p1 != has_p2:
+                return
 
     def _finalize_turn(self) -> None:
-        winner = self._sole_survivor()
-        # During placement both players haven't played yet, so ignore that phase.
+        plrs = self._players
+        has_p1 = has_p2 = False
+        for i in range(_N):
+            pi = plrs[i]
+            if pi is True:
+                has_p1 = True
+            elif pi is False:
+                has_p2 = True
+        winner: Player = None
+        if has_p1 and not has_p2:
+            winner = True
+        elif has_p2 and not has_p1:
+            winner = False
         if winner is not None and self._phase is Phase.PLAYING:
             self._phase = Phase.ENDED
             self._winner = winner
             return
         self._turn = not self._turn
 
-    def _snapshot(self, *, accepted: bool) -> GameState:
+    def _snapshot(self, accepted: bool) -> GameState:
         return GameState(
-            tiles=tuple(self._tiles),
+            values=tuple(self._values),
+            players=tuple(self._players),
             size=self._size,
             turn=self._turn,
             phase=self._phase,
@@ -213,3 +223,4 @@ class Game:
 
 
 __all__ = ["Game", "GameState", "Tile", "Phase", "BOARD_SIZE", "INITIAL_ORB_VALUE"]
+
