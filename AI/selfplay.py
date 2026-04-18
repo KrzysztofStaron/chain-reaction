@@ -489,7 +489,15 @@ def main() -> None:
     # Skip channels_last: for 5x5 boards the layout conversions cost more than
     # they save; also avoids a per-step batch permute in the self-play loop.
     if args.compile:
-        model = torch.compile(model, mode=args.compile_mode)
+        # Self-play batches shrink from games_per_iter -> 0 as games finish, and
+        # the last train minibatch is smaller than batch_size. With
+        # mode="reduce-overhead", every distinct shape captures a new CUDA
+        # graph and the pool grows until OOM during capture. Skip graph capture
+        # for non-stable shapes; they still run the compiled kernels.
+        import torch._inductor.config as _ind_cfg
+        _ind_cfg.triton.cudagraph_skip_dynamic_graphs = True
+        _ind_cfg.triton.cudagraph_dynamic_shape_warn_limit = None
+        model = torch.compile(model, mode=args.compile_mode, dynamic=True)
 
     optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
