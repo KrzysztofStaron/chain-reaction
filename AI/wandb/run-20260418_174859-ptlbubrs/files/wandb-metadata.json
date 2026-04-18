@@ -1,0 +1,38 @@
+{
+  "os":  "macOS-26.3.1-arm64-arm-64bit-Mach-O",
+  "python":  "CPython 3.14.2",
+  "startedAt":  "2026-04-18T15:48:59.559775Z",
+  "program":  "/Users/krzysztofstaron/Projects/chain-reaction/AI/selfplay.py",
+  "codePath":  "AI/selfplay.py",
+  "codePathLocal":  "selfplay.py",
+  "git":  {
+    "remote":  "https://github.com/KrzysztofStaron/chain-reaction.git",
+    "commit":  "2ac7dabb6e66cc956ee7c30875214baae25425f5"
+  },
+  "email":  "kisiel3141@gmail.com",
+  "root":  "/Users/krzysztofstaron/Projects/chain-reaction/AI",
+  "host":  "MacBook-Pro-Krzysztof.local",
+  "executable":  "/Users/krzysztofstaron/Projects/chain-reaction/.venv/bin/python",
+  "cpu_count":  10,
+  "cpu_count_logical":  10,
+  "disk":  {
+    "/":  {
+      "total":  "1995186708480",
+      "used":  "245521502208"
+    }
+  },
+  "memory":  {
+    "total":  "34359738368"
+  },
+  "apple":  {
+    "name":  "Apple M1 Max",
+    "ecpuCores":  2,
+    "pcpuCores":  8,
+    "gpuCores":  24,
+    "memoryGb":  32,
+    "swapTotalBytes":  "2147483648",
+    "ramTotalBytes":  "34359738368",
+    "macModel":  "MacBookPro18,4"
+  },
+  "writerId":  "pk7w019zzckfwq257owxqopzev8j00od"
+}

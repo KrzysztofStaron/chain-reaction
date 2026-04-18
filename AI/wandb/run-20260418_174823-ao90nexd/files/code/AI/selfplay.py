@@ -102,12 +102,11 @@ def run_selfplay_batch(
         active_states = [states[i] for i in active_indices]
         batch_cpu, masks_cpu = batch_encode_and_mask(active_states)
 
-        if device.type == "cuda":
-            batch_cpu = batch_cpu.pin_memory()
-            masks_cpu = masks_cpu.pin_memory()
-
         batch = batch_cpu.to(device, non_blocking=True)
         masks = masks_cpu.to(device, non_blocking=True)
+
+        if device.type == "cuda":
+            batch = batch.to(memory_format=torch.channels_last)
 
         amp_ctx = (
             torch.autocast(device_type="cuda", dtype=torch.bfloat16)
@@ -137,10 +136,8 @@ def run_selfplay_batch(
             s = states[i]
             trajectories[i].steps.append(
                 Step(
-                    # Clone rows so we do not retain every timestep's full
-                    # [N,4,5,5] batch tensor in memory (was blowing up RAM/GC).
-                    state_tensor=batch_cpu[slot].clone(),
-                    legal=masks_cpu[slot].clone(),
+                    state_tensor=batch_cpu[slot],
+                    legal=masks_cpu[slot],
                     action=a,
                     player=s.turn,
                 )
@@ -298,6 +295,9 @@ def train_step(
     states, masks, actions, outcomes = batch
     model.train()
 
+    if device.type == "cuda":
+        states = states.to(memory_format=torch.channels_last)
+
     amp_ctx = (
         torch.autocast(device_type="cuda", dtype=torch.bfloat16)
         if use_amp and device.type == "cuda"
@@ -379,12 +379,6 @@ def main() -> None:
     tune_runtime(device)
     use_amp = (device.type == "cuda") and (not args.no_amp)
     print(f"device={device} amp={use_amp} compile={args.compile}")
-    if device.type == "cpu" and args.games_per_iter >= 128:
-        print(
-            "warning: self-play is mostly batched NN forwards; on CPU this is often "
-            "100–300s+ per iter at --games-per-iter 512. Use CUDA (or MPS on Mac) "
-            "for ~10–30x faster play."
-        )
 
     # ---- Weights & Biases ---------------------------------------------------
     use_wandb = not args.no_wandb
@@ -394,7 +388,7 @@ def main() -> None:
             config=vars(args),
             save_code=True,
         )
-        print(f"wandb run: {wandb.run.url}")
+        print(f"wandb run: {wandb.run.get_url()}")
 
     # ---- Hugging Face Hub ----------------------------------------------------
     use_hf = not args.no_hf
@@ -406,8 +400,8 @@ def main() -> None:
     model = ChainReactionNet(
         in_channels=4, channels=args.channels, num_blocks=args.blocks
     ).to(device)
-    # Skip channels_last: for 5x5 boards the layout conversions cost more than
-    # they save; also avoids a per-step batch permute in the self-play loop.
+    if device.type == "cuda":
+        model = model.to(memory_format=torch.channels_last)
     if args.compile:
         model = torch.compile(model, mode="max-autotune")
 

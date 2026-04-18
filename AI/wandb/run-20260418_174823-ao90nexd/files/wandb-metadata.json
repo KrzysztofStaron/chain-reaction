@@ -1,0 +1,17 @@
+{
+  "os":  "macOS-26.3.1-arm64-arm-64bit-Mach-O",
+  "python":  "CPython 3.14.2",
+  "startedAt":  "2026-04-18T15:48:23.695358Z",
+  "program":  "/Users/krzysztofstaron/Projects/chain-reaction/AI/selfplay.py",
+  "codePath":  "AI/selfplay.py",
+  "codePathLocal":  "selfplay.py",
+  "git":  {
+    "remote":  "https://github.com/KrzysztofStaron/chain-reaction.git",
+    "commit":  "2ac7dabb6e66cc956ee7c30875214baae25425f5"
+  },
+  "email":  "kisiel3141@gmail.com",
+  "root":  "/Users/krzysztofstaron/Projects/chain-reaction/AI",
+  "host":  "MacBook-Pro-Krzysztof.local",
+  "executable":  "/Users/krzysztofstaron/Projects/chain-reaction/.venv/bin/python",
+  "writerId":  "vsiz5x77opjx2ijlu34h6ktvimq1wvfr"
+}

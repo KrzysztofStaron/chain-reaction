@@ -1,0 +1,33 @@
+[34m[1mwandb[0m: [33mWARNING[0m The get_url method is deprecated and will be removed in a future release. Please use `run.url` instead.
+wandb run: https://wandb.ai/kstaron-/chain-reaction/runs/ao90nexd
+Traceback (most recent call last):
+  File "/Users/krzysztofstaron/Projects/chain-reaction/.venv/lib/python3.14/site-packages/huggingface_hub/utils/_http.py", line 761, in hf_raise_for_status
+    response.raise_for_status()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/Users/krzysztofstaron/Projects/chain-reaction/.venv/lib/python3.14/site-packages/httpx/_models.py", line 829, in raise_for_status
+    raise HTTPStatusError(message, request=request, response=self)
+httpx.HTTPStatusError: Client error '401 Unauthorized' for url 'https://huggingface.co/api/repos/create'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/krzysztofstaron/Projects/chain-reaction/AI/selfplay.py", line 537, in <module>
+    main()
+    ~~~~^^
+  File "/Users/krzysztofstaron/Projects/chain-reaction/AI/selfplay.py", line 397, in main
+    hf_api.create_repo(repo_id=args.hf_repo, exist_ok=True)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/krzysztofstaron/Projects/chain-reaction/.venv/lib/python3.14/site-packages/huggingface_hub/utils/_deprecation.py", line 101, in inner_f
+    return f(*args, **kwargs)
+  File "/Users/krzysztofstaron/Projects/chain-reaction/.venv/lib/python3.14/site-packages/huggingface_hub/utils/_validators.py", line 88, in _inner_fn
+    return fn(*args, **kwargs)
+  File "/Users/krzysztofstaron/Projects/chain-reaction/.venv/lib/python3.14/site-packages/huggingface_hub/hf_api.py", line 4499, in create_repo
+    hf_raise_for_status(r)
+    ~~~~~~~~~~~~~~~~~~~^^^
+  File "/Users/krzysztofstaron/Projects/chain-reaction/.venv/lib/python3.14/site-packages/huggingface_hub/utils/_http.py", line 877, in hf_raise_for_status
+    raise _format(HfHubHTTPError, str(e), response) from e
+huggingface_hub.errors.HfHubHTTPError: Client error '401 Unauthorized' for url 'https://huggingface.co/api/repos/create' (Request ID: Root=1-69e3a7ca-5500305426e9505564e4de94;6a3a1fe9-aa12-4333-900a-1146694dddbf)
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401
+
+Invalid username or password.

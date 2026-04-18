@@ -1,0 +1,21 @@
+[34m[1mwandb[0m: [33mWARNING[0m The get_url method is deprecated and will be removed in a future release. Please use `run.url` instead.
+wandb run: https://wandb.ai/kstaron-/chain-reaction/runs/ptlbubrs
+HF repo: https://huggingface.co/PanzerBread/chain-reaction
+Traceback (most recent call last):
+  File "/Users/krzysztofstaron/Projects/chain-reaction/AI/selfplay.py", line 537, in <module>
+    main()
+    ~~~~^^
+  File "/Users/krzysztofstaron/Projects/chain-reaction/AI/selfplay.py", line 458, in main
+    train_step(
+    ~~~~~~~~~~^
+        model,
+        ^^^^^^
+    ...<5 lines>...
+        value_coef=args.value_coef,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/krzysztofstaron/Projects/chain-reaction/AI/selfplay.py", line 335, in train_step
+    "loss": float(loss.detach().item()),
+                  ~~~~~~~~~~~~~~~~~~^^
+KeyboardInterrupt

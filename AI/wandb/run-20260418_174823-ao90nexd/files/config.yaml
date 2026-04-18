@@ -1,0 +1,83 @@
+_wandb:
+    value:
+        cli_version: 0.26.0
+        code_path: code/AI/selfplay.py
+        e:
+            vsiz5x77opjx2ijlu34h6ktvimq1wvfr:
+                codePath: AI/selfplay.py
+                codePathLocal: selfplay.py
+                email: kisiel3141@gmail.com
+                executable: /Users/krzysztofstaron/Projects/chain-reaction/.venv/bin/python
+                git:
+                    commit: 2ac7dabb6e66cc956ee7c30875214baae25425f5
+                    remote: https://github.com/KrzysztofStaron/chain-reaction.git
+                host: MacBook-Pro-Krzysztof.local
+                os: macOS-26.3.1-arm64-arm-64bit-Mach-O
+                program: /Users/krzysztofstaron/Projects/chain-reaction/AI/selfplay.py
+                python: CPython 3.14.2
+                root: /Users/krzysztofstaron/Projects/chain-reaction/AI
+                startedAt: "2026-04-18T15:48:23.695358Z"
+                writerId: vsiz5x77opjx2ijlu34h6ktvimq1wvfr
+        m: []
+        python_version: 3.14.2
+        t:
+            "1":
+                - 1
+                - 49
+            "2":
+                - 1
+                - 49
+            "3":
+                - 16
+            "4": 3.14.2
+            "5": 0.26.0
+            "10":
+                - 21
+            "12": 0.26.0
+            "13": darwin-arm64
+batch_size:
+    value: 2048
+blocks:
+    value: 6
+channels:
+    value: 128
+ckpt_dir:
+    value: checkpoints
+ckpt_every:
+    value: 25
+compile:
+    value: false
+entropy_coef:
+    value: 0.03
+epochs_per_iter:
+    value: 4
+games_per_iter:
+    value: 512
+hf_repo:
+    value: PanzerBread/chain-reaction
+iters:
+    value: 10000
+lr:
+    value: 0.0005
+max_steps:
+    value: 200
+no_amp:
+    value: false
+no_augment:
+    value: false
+no_hf:
+    value: false
+no_wandb:
+    value: false
+resume:
+    value: null
+seed:
+    value: 0
+temperature:
+    value: 1
+value_coef:
+    value: 1
+wandb_project:
+    value: chain-reaction
+weight_decay:
+    value: 0.0001

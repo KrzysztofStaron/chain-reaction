@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import torch
 
 from game import Game, GameState, Phase, Tile
@@ -25,8 +26,6 @@ def encode(board: GameState, current_player: bool, is_placement_phase: bool) -> 
     phase_val = 1.0 if is_placement_phase else 0.0
     dif = calc_dif(board, current_player)
 
-    # Build flat list then create tensor in one C call — avoids 25+ slow
-    # Python→torch element assignments.
     ch0 = [0.0] * 25
     ch1 = [0.0] * 25
     for i in range(25):
@@ -40,11 +39,7 @@ def encode(board: GameState, current_player: bool, is_placement_phase: bool) -> 
 
 
 def legal_mask(state: GameState) -> torch.Tensor:
-    """Return a [25] bool mask of legal moves for `state.turn`.
-
-    Placement phase: any unowned cell is legal.
-    Playing phase:   only cells owned by the current player are legal.
-    """
+    """Return a [25] bool mask of legal moves for `state.turn`."""
     plrs = state.players
     if state.phase is Phase.PLACEMENT:
         return torch.tensor([p is None for p in plrs], dtype=torch.bool)
@@ -58,50 +53,48 @@ def batch_encode_and_mask(states: list[GameState]) -> tuple[torch.Tensor, torch.
     Returns (batch, masks) where:
         batch: [N, 4, 5, 5] float32
         masks: [N, 25] bool
-    Creates exactly 2 tensors total instead of 2*N, avoiding per-state
-    tensor allocation and the torch.stack() copy.
+    Uses NumPy for the hot fill loop, then torch.from_numpy (fast memcpy).
     """
-    all_enc: list[float] = []
-    all_mask: list[bool] = []
+    n = len(states)
+    enc = np.zeros((n, 4, 5, 5), dtype=np.float32)
+    msk = np.zeros((n, 25), dtype=np.bool_)
 
-    for s in states:
+    for si, s in enumerate(states):
         vals = s.values
         plrs = s.players
         cp = s.turn
         is_place = s.phase is Phase.PLACEMENT
-        phase_val = 1.0 if is_place else 0.0
+        pv = 1.0 if is_place else 0.0
 
-        player_count = 0
-        opp_count = 0
-
-        ch0 = [0.0] * 25
-        ch1 = [0.0] * 25
+        pc = oc = 0
+        e0 = enc[si, 0]
+        e1 = enc[si, 1]
         for i in range(25):
             p = plrs[i]
-            if p is not None:
-                ch0[i] = vals[i] / 3.0
-                ch1[i] = 1.0 if p == cp else -1.0
-                if p == cp:
-                    player_count += 1
-                else:
-                    opp_count += 1
+            if p is None:
+                continue
+            r, c = divmod(i, 5)
+            e0[r, c] = vals[i] / 3.0
+            e1[r, c] = 1.0 if p == cp else -1.0
+            if p == cp:
+                pc += 1
+            else:
+                oc += 1
 
-        dif = (player_count - opp_count) / 25.0
-        all_enc.extend(ch0)
-        all_enc.extend(ch1)
-        for _ in range(25):
-            all_enc.append(phase_val)
-        for _ in range(25):
-            all_enc.append(dif)
+        d = (pc - oc) / 25.0
+        enc[si, 2, :, :] = pv
+        enc[si, 3, :, :] = d
 
+        row = msk[si]
         if is_place:
-            all_mask.extend(p is None for p in plrs)
+            for i in range(25):
+                row[i] = plrs[i] is None
         else:
-            all_mask.extend(p == cp for p in plrs)
+            for i in range(25):
+                row[i] = plrs[i] == cp
 
-    n = len(states)
-    batch = torch.tensor(all_enc, dtype=torch.float32).view(n, 4, 5, 5)
-    masks = torch.tensor(all_mask, dtype=torch.bool).view(n, 25)
+    batch = torch.from_numpy(enc)
+    masks = torch.from_numpy(msk)
     return batch, masks
 
 
