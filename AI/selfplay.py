@@ -178,7 +178,15 @@ def run_selfplay_batch(
 # ----------------------------------------------------------------------------
 # Trajectory -> training tensors
 # ----------------------------------------------------------------------------
-def trajectories_to_batch(trajectories: list[Trajectory], device: torch.device):
+def trajectories_to_batch(trajectories: list[Trajectory]) -> (
+    tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor] | None
+):
+    """Stack trajectories on CPU.
+
+    D4 augment builds 8 views then ``torch.cat``; doing that on CUDA spikes VRAM
+    (worse with ``torch.compile`` CUDA graph pools). Collate + augment stay on
+    CPU; ``main`` moves tensors to the train device once.
+    """
     states: list[torch.Tensor] = []
     masks: list[torch.Tensor] = []
     actions: list[int] = []
@@ -197,10 +205,10 @@ def trajectories_to_batch(trajectories: list[Trajectory], device: torch.device):
     if not states:
         return None
 
-    states_t = torch.stack(states).to(device, non_blocking=True)
-    masks_t = torch.stack(masks).to(device, non_blocking=True)
-    actions_t = torch.tensor(actions, dtype=torch.long, device=device)
-    outcomes_t = torch.tensor(outcomes, dtype=torch.float32, device=device)
+    states_t = torch.stack(states)
+    masks_t = torch.stack(masks)
+    actions_t = torch.tensor(actions, dtype=torch.long)
+    outcomes_t = torch.tensor(outcomes, dtype=torch.float32)
     return states_t, masks_t, actions_t, outcomes_t
 
 
@@ -275,8 +283,17 @@ def augment_symmetries(
     Tensor rotations and the action-index permutation are kept consistent:
     rotating state[..., y, x] by symmetry k sends the value to (y', x') via
     transform k; action index y*N+x is remapped to y'*N+x' via the same k.
+
+    If inputs are on CUDA, they are moved to CPU first so ``cat`` does not OOM.
+    Returns CPU tensors; caller moves to the train device.
     """
-    perms = _sym_perms(size, states.device)  # [8, size*size]
+    if states.device.type == "cuda":
+        states = states.cpu()
+        masks = masks.cpu()
+        actions = actions.cpu()
+        outcomes = outcomes.cpu()
+
+    perms = _sym_perms(size, torch.device("cpu"))  # [8, size*size]
 
     out_states: list[torch.Tensor] = []
     out_masks: list[torch.Tensor] = []
@@ -507,10 +524,10 @@ def main() -> None:
         n_steps_collate = sum(len(t.steps) for t in finished)
         print(
             f"  iter {it:05d} | self-play {t_play:.1f}s — collating "
-            f"{n_steps_collate} samples ({len(finished)}/{len(trajs)} games) → GPU…",
+            f"{n_steps_collate} samples ({len(finished)}/{len(trajs)} games) (CPU)…",
             flush=True,
         )
-        batch = trajectories_to_batch(trajs, device)
+        batch = trajectories_to_batch(trajs)
         if batch is None:
             print(f"iter {it:05d} | no finished games -- skipping update")
             continue
@@ -526,6 +543,17 @@ def main() -> None:
                 states, masks, actions, outcomes
             )
         n_samples = states.size(0)
+
+        nb = device.type == "cuda"
+        if nb:
+            states = states.pin_memory()
+            masks = masks.pin_memory()
+            actions = actions.pin_memory()
+            outcomes = outcomes.pin_memory()
+        states = states.to(device, non_blocking=nb)
+        masks = masks.to(device, non_blocking=nb)
+        actions = actions.to(device, non_blocking=nb)
+        outcomes = outcomes.to(device, non_blocking=nb)
 
         n_batch = (n_samples + args.batch_size - 1) // args.batch_size
         train_steps = args.epochs_per_iter * n_batch
