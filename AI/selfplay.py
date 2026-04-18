@@ -364,13 +364,29 @@ def train_step(
 # Main training loop
 # ----------------------------------------------------------------------------
 def main() -> None:
+    _cuda = torch.cuda.is_available()
+    # CUDA: larger defaults to feed the GPU (tiny 5×5 convs are launch-bound at 2k batch).
+    _def_games = 1536 if _cuda else 512
+    _def_batch = 12288 if _cuda else 2048
+
     parser = argparse.ArgumentParser()
-    parser.add_argument("--games-per-iter", type=int, default=512)
+    parser.add_argument(
+        "--games-per-iter",
+        type=int,
+        default=_def_games,
+        help=f"Parallel self-play envs (default {_def_games} on CUDA, 512 on CPU/MPS).",
+    )
     parser.add_argument("--iters", type=int, default=10_000)
     parser.add_argument("--lr", type=float, default=5e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--epochs-per-iter", type=int, default=4)
-    parser.add_argument("--batch-size", type=int, default=2048)
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=_def_batch,
+        help=f"Train minibatch size (default {_def_batch} on CUDA, 2048 elsewhere). "
+        "On 10–12GB try 16384–24576 if OOM is not hit.",
+    )
     parser.add_argument("--channels", type=int, default=128)
     parser.add_argument("--blocks", type=int, default=6)
     parser.add_argument("--temperature", type=float, default=1.0)
@@ -380,7 +396,19 @@ def main() -> None:
     parser.add_argument("--ckpt-every", type=int, default=25)
     parser.add_argument("--ckpt-dir", type=str, default="checkpoints")
     parser.add_argument("--resume", type=str, default=None)
-    parser.add_argument("--compile", action="store_true")
+    parser.add_argument(
+        "--compile",
+        action="store_true",
+        help="torch.compile the policy net (CUDA: often +10–40%% train throughput; "
+        "first iter pays compile cost).",
+    )
+    parser.add_argument(
+        "--compile-mode",
+        type=str,
+        default="reduce-overhead",
+        choices=("default", "reduce-overhead", "max-autotune"),
+        help="torch.compile mode (reduce-overhead fits small models well).",
+    )
     parser.add_argument("--no-amp", action="store_true")
     parser.add_argument(
         "--no-augment",
@@ -404,7 +432,16 @@ def main() -> None:
     device = pick_device()
     tune_runtime(device)
     use_amp = (device.type == "cuda") and (not args.no_amp)
-    print(f"device={device} amp={use_amp} compile={args.compile}")
+    print(
+        f"device={device} amp={use_amp} compile={args.compile} "
+        f"(games={args.games_per_iter} batch={args.batch_size})"
+    )
+    if device.type == "cuda":
+        print(
+            "CUDA saturation: this model is tiny — if util/memory stay low, raise "
+            "--batch-size (e.g. 24576) and/or --games-per-iter; add --compile for "
+            "faster train steps. Self-play stays CPU-bound between NN forwards."
+        )
     if device.type == "cpu" and args.games_per_iter >= 128:
         print(
             "warning: self-play is mostly batched NN forwards; on CPU this is often "
@@ -435,7 +472,7 @@ def main() -> None:
     # Skip channels_last: for 5x5 boards the layout conversions cost more than
     # they save; also avoids a per-step batch permute in the self-play loop.
     if args.compile:
-        model = torch.compile(model, mode="max-autotune")
+        model = torch.compile(model, mode=args.compile_mode)
 
     optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
@@ -467,6 +504,12 @@ def main() -> None:
         n_p1 = sum(1 for t in finished if t.winner is True)
         avg_len = sum(len(t.steps) for t in trajs) / max(len(trajs), 1)
 
+        n_steps_collate = sum(len(t.steps) for t in finished)
+        print(
+            f"  iter {it:05d} | self-play {t_play:.1f}s — collating "
+            f"{n_steps_collate} samples ({len(finished)}/{len(trajs)} games) → GPU…",
+            flush=True,
+        )
         batch = trajectories_to_batch(trajs, device)
         if batch is None:
             print(f"iter {it:05d} | no finished games -- skipping update")
@@ -475,13 +518,32 @@ def main() -> None:
         states, masks, actions, outcomes = batch
         raw_samples = states.size(0)
         if not args.no_augment:
+            print(
+                f"  iter {it:05d} | D4 augment 8× ({raw_samples} → {raw_samples * 8})…",
+                flush=True,
+            )
             states, masks, actions, outcomes = augment_symmetries(
                 states, masks, actions, outcomes
             )
         n_samples = states.size(0)
 
+        n_batch = (n_samples + args.batch_size - 1) // args.batch_size
+        train_steps = args.epochs_per_iter * n_batch
+        print(
+            f"  iter {it:05d} | training {train_steps} minibatches "
+            f"({args.epochs_per_iter}×{n_batch} @ {args.batch_size})…",
+            flush=True,
+        )
+
         t1 = time.time()
         losses: list[dict[str, float]] = []
+        train_pbar = tqdm(
+            total=train_steps,
+            desc="train",
+            unit="step",
+            leave=False,
+            disable=args.no_progress,
+        )
         for _ in range(args.epochs_per_iter):
             perm = torch.randperm(n_samples, device=device)
             for s_idx in range(0, n_samples, args.batch_size):
@@ -498,6 +560,8 @@ def main() -> None:
                         value_coef=args.value_coef,
                     )
                 )
+                train_pbar.update(1)
+        train_pbar.close()
         t_train = time.time() - t1
 
         avg = {k: sum(l[k] for l in losses) / len(losses) for k in losses[0]}
